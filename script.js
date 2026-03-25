@@ -5,21 +5,48 @@ const movieResults = document.getElementById('movie-results');
 const watchlist = new Set(); // Use a Set to avoid duplicates
 const watchlistContainer = document.getElementById('watchlist');
 
+// Show a user-friendly message in a section when something fails
+function showUserError(container, message) {
+  container.innerHTML = `<p class="no-results">${message}</p>`;
+}
+
 // Function to fetch movies from the OMDb API
-async function fetchMovies(query) {
+function fetchMovies(query) {
   const apiKey = 'your-api-key'; // Replace with your OMDb API key
   const url = `https://www.omdbapi.com/?s=${query}&apikey=${apiKey}`;
 
   // Fetch data from the API
-  const response = await fetch(url);
-  const data = await response.json();
-
-  // Check if the response contains movies
-  if (data.Response === 'True') {
-    displayMovies(data.Search);
-  } else {
-    movieResults.innerHTML = '<p class="no-results">No results found. Please try a different search.</p>';
-  }
+  fetch(url)
+    .then((response) => {
+      // Check HTTP status first (network/server-level errors)
+      if (!response.ok) {
+        throw new Error(`Search request failed with status ${response.status}`);
+      }
+      return response.json();
+    })
+    .then((data) => {
+      // Check API-level response
+      if (data.Response === 'True') {
+        displayMovies(data.Search);
+      } else if (data.Error === 'Movie not found!') {
+        movieResults.innerHTML = '<p class="no-results">No results found. Please try a different search.</p>';
+      } else {
+        console.error('OMDb search API returned an error:', {
+          query,
+          apiError: data.Error,
+          url,
+        });
+        showUserError(movieResults, 'Something went wrong while searching. Please try again.');
+      }
+    })
+    .catch((error) => {
+      console.error('Failed to fetch movies:', {
+        query,
+        url,
+        error,
+      });
+      showUserError(movieResults, 'We could not load movies right now. Please try again in a moment.');
+    });
 }
 
 // Function to save the watchlist to local storage
@@ -49,26 +76,48 @@ async function updateWatchlistDisplay() {
   if (watchlist.size === 0) {
     watchlistContainer.innerHTML = '<p>Your watchlist is empty. Search for movies to add!</p>';
   } else {
-    watchlist.forEach(async (movieID) => {
+    for (const movieID of watchlist) {
       const apiKey = 'your-api-key'; // Replace with your OMDb API key
       const url = `https://www.omdbapi.com/?i=${movieID}&apikey=${apiKey}`;
-      const response = await fetch(url);
-      const movie = await response.json();
 
-      const watchlistCard = document.createElement('div');
-      watchlistCard.classList.add('movie-card');
+      try {
+        const response = await fetch(url);
 
-      watchlistCard.innerHTML = `
-        <img src="${movie.Poster}" alt="${movie.Title}" class="movie-poster">
-        <div class="movie-info">
-          <h3 class="movie-title">${movie.Title}</h3>
-          <p class="movie-year">${movie.Year}</p>
-          <button class="btn btn-remove" onclick='removeFromWatchlist("${movie.imdbID}")'>Remove</button>
-        </div>
-      `;
+        // Check HTTP status first
+        if (!response.ok) {
+          throw new Error(`Watchlist request failed with status ${response.status}`);
+        }
 
-      watchlistContainer.appendChild(watchlistCard);
-    });
+        const movie = await response.json();
+
+        // Check API-level response
+        if (movie.Response !== 'True') {
+          throw new Error(movie.Error || 'Unknown watchlist API error');
+        }
+
+        const watchlistCard = document.createElement('div');
+        watchlistCard.classList.add('movie-card');
+
+        watchlistCard.innerHTML = `
+          <img src="${movie.Poster}" alt="${movie.Title}" class="movie-poster">
+          <div class="movie-info">
+            <h3 class="movie-title">${movie.Title}</h3>
+            <p class="movie-year">${movie.Year}</p>
+            <button class="btn btn-remove" onclick='removeFromWatchlist("${movie.imdbID}")'>Remove</button>
+          </div>
+        `;
+
+        watchlistContainer.appendChild(watchlistCard);
+      } catch (error) {
+        console.error('Failed to fetch watchlist movie details:', {
+          movieID,
+          url,
+          error,
+        });
+        showUserError(watchlistContainer, 'We could not load your watchlist right now. Please try again later.');
+        break;
+      }
+    }
   }
 }
 
